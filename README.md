@@ -116,6 +116,12 @@ python -m agents.feasibility_agent <input.json>
 
 # Reporter (requires feasibility output)
 python -m agents.reporter_agent <input.json>
+
+# Weekly review
+python -m agents.weekly_review_agent
+
+# Monthly report
+python -m agents.monthly_report_agent
 ```
 
 ### Automate with cron
@@ -172,8 +178,11 @@ Runtime directories (auto-created, git-ignored):
 
 ```
 ├── data/
-│   ├── daily_scans/     # Daily scan JSONs
-│   └── strategy_db.json # Persistent dedup database
-├── reports/             # Daily markdown digests
-└── logs/                # Daily pipeline logs
+│   ├── daily_scans/       # Daily scan JSONs
+│   ├── strategy_db.json   # Persistent dedup database
+│   └── active_strategies.json # Forward-test registry
+├── reports/               # Daily markdown digests
+├── weekly_reviews/        # Weekly reviews
+├── monthly_reports/       # Monthly reports
+└── logs/                  # Daily pipeline logs
 ```
