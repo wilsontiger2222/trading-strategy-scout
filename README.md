@@ -26,11 +26,11 @@ An autonomous multi-agent system that scans GitHub daily for new trading strateg
 
 | Agent | Purpose |
 |-------|---------|
-| **Scout** | Searches GitHub for repos matching trading/quant keywords updated in the last 24h. Filters by Python language, 2+ stars, and README presence. |
-| **Analyst** | Reads each repo's README and up to 3 core Python files to produce a plain-English strategy summary. Extracts concept, entry/exit logic, indicators, timeframe, and asset class. Never stores code. |
+| **Scout** | Searches GitHub for repos matching trading/quant keywords updated in the last N hours. Filters by language allowlist, stars, README, and excludes keywords (e.g., arbitrage). |
+| **Analyst** | Reads each repo's README and up to 3 core Python files to produce a plain-English strategy summary. Extracts concept, entry/exit logic, indicators, timeframe, asset class, and **Hyperliquid compatibility**. Never stores code. |
 | **Dedup** | Maintains a persistent strategy database. Uses TF-IDF cosine similarity to flag duplicates (>0.8), similar (0.5–0.8), and novel (<0.5) strategies. |
-| **Feasibility** | Scores each novel strategy on 5 criteria (1–10): implementation complexity, capital efficiency, edge durability, platform compatibility, and data requirements. Produces a weighted score and recommendation. |
-| **Reporter** | Selects the top 5 strategies, generates a markdown digest, saves it to disk, and sends a summary via Telegram. |
+| **Feasibility** | Scores each novel strategy on 5 criteria (1–10): implementation complexity, capital efficiency, edge durability, platform compatibility, and data requirements. Produces a weighted score and recommendation. Excluded strategies auto‑skip. |
+| **Reporter** | Selects the top 5 strategies, generates a markdown digest, saves it to disk, and sends a summary via Telegram (now includes Hyperliquid fit). |
 
 ### Data Flow
 
@@ -73,6 +73,10 @@ cp .env.example .env
 Edit `.env` and fill in:
 
 - `GITHUB_TOKEN` — Optional but recommended. A [GitHub personal access token](https://github.com/settings/tokens) increases the API rate limit from 60 to 5,000 requests/hour.
+- `MIN_STARS` — Minimum stars (default 2)
+- `SINCE_HOURS` — Lookback window (default 24)
+- `ALLOWED_LANGUAGES` — Comma‑separated allowlist (default Python)
+- `EXCLUDE_KEYWORDS` — Comma‑separated exclusion list (default: arbitrage)
 - `BOT_TOKEN` — Get one from [@BotFather](https://t.me/BotFather) on Telegram.
 - `CHAT_ID` — Get yours from [@userinfobot](https://t.me/userinfobot) on Telegram.
 

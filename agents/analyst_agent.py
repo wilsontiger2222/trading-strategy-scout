@@ -34,6 +34,8 @@ STRATEGY_CATEGORIES = [
     "other",
 ]
 
+EXCLUDE_KEYWORDS = [s.strip().lower() for s in os.environ.get("EXCLUDE_KEYWORDS", "arbitrage").split(",") if s.strip()]
+
 
 def _github_headers() -> dict:
     headers = {"Accept": "application/vnd.github+json"}
@@ -245,7 +247,7 @@ def _summarize_strategy(readme: str, file_contents: list[str]) -> dict:
     # Asset class hints
     asset_class = "not specified"
     asset_keywords = {
-        "crypto": ["crypto", "bitcoin", "btc", "eth", "binance", "defi", "token"],
+        "crypto": ["crypto", "bitcoin", "btc", "eth", "binance", "defi", "token", "perp", "perpetual"],
         "equities": ["stock", "equity", "equities", "s&p", "nasdaq", "nyse", "shares"],
         "forex": ["forex", "fx", "currency pair", "eur/usd", "gbp"],
         "futures": ["futures", "contract", "expiry", "cme"],
@@ -256,6 +258,14 @@ def _summarize_strategy(readme: str, file_contents: list[str]) -> dict:
         if any(kw in lower_raw for kw in keywords):
             asset_class = asset
             break
+
+    # Exclusion (e.g., arbitrage) based on keyword match
+    excluded = any(kw in lower_raw for kw in EXCLUDE_KEYWORDS)
+    exclude_reason = f"contains excluded keyword(s): {', '.join(EXCLUDE_KEYWORDS)}" if excluded else ""
+
+    # Hyperliquid compatibility heuristic
+    hyperliquid_compatible = asset_class == "crypto" and "equities" not in lower_raw and "forex" not in lower_raw
+    exchange_compatibility = ["hyperliquid"] if hyperliquid_compatible else []
 
     # --- Core concept: extracted from cleaned README prose only ---
     readme_excerpt = clean_readme[:2000].strip()
@@ -278,6 +288,10 @@ def _summarize_strategy(readme: str, file_contents: list[str]) -> dict:
         "timeframe": timeframe,
         "asset_class": asset_class,
         "category": category,
+        "excluded": excluded,
+        "exclude_reason": exclude_reason,
+        "hyperliquid_compatible": hyperliquid_compatible,
+        "exchange_compatibility": exchange_compatibility,
     }
 
 

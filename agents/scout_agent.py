@@ -28,11 +28,16 @@ SEARCH_KEYWORDS = [
     "crypto trading",
     "market making",
     "statistical arbitrage",
+    "perp trading",
+    "futures strategy",
 ]
 
 GITHUB_API = "https://api.github.com"
-MIN_STARS = 2
-PREFERRED_LANGUAGE = "Python"
+MIN_STARS = int(os.environ.get("MIN_STARS", "2"))
+PREFERRED_LANGUAGE = os.environ.get("PREFERRED_LANGUAGE", "Python")
+ALLOWED_LANGUAGES = [s.strip() for s in os.environ.get("ALLOWED_LANGUAGES", "Python").split(",") if s.strip()]
+EXCLUDE_KEYWORDS = [s.strip().lower() for s in os.environ.get("EXCLUDE_KEYWORDS", "arbitrage").split(",") if s.strip()]
+SINCE_HOURS = int(os.environ.get("SINCE_HOURS", "24"))
 # Pause between API requests to stay under rate limits
 REQUEST_DELAY_SECONDS = 2
 
@@ -108,7 +113,7 @@ def run(output_path: str | None = None) -> list[dict]:
     """
     logger.info("Scout agent starting")
     headers = _github_headers()
-    since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%d")
+    since = (datetime.now(timezone.utc) - timedelta(hours=SINCE_HOURS)).strftime("%Y-%m-%d")
 
     seen_urls: set[str] = set()
     results: list[dict] = []
@@ -124,9 +129,18 @@ def run(output_path: str | None = None) -> list[dict]:
                 continue
             seen_urls.add(url)
 
-            # Prefer Python repos but don't hard-exclude others
+            # Language filter (allowlist)
             lang = repo.get("language") or ""
-            if lang and lang != PREFERRED_LANGUAGE:
+            if ALLOWED_LANGUAGES and lang and lang not in ALLOWED_LANGUAGES:
+                continue
+
+            # Exclude keywords (arbitrage etc.) in name/desc/topics
+            haystack = " ".join([
+                repo.get("full_name", ""),
+                repo.get("description") or "",
+                " ".join(repo.get("topics") or []),
+            ]).lower()
+            if any(kw in haystack for kw in EXCLUDE_KEYWORDS):
                 continue
 
             if not _has_readme(repo["full_name"], headers):

@@ -179,6 +179,20 @@ def _score_data_requirements(summary: dict) -> int:
 
 def _compute_feasibility(summary: dict) -> dict:
     """Compute all scores and the weighted overall feasibility score."""
+    if summary.get("excluded"):
+        return {
+            "scores": {
+                "implementation_complexity": 0,
+                "capital_efficiency": 0,
+                "edge_durability": 0,
+                "platform_compatibility": 0,
+                "data_requirements": 0,
+            },
+            "overall_score": 0,
+            "recommendation": "skip",
+            "notes": f"Excluded: {summary.get('exclude_reason','policy')}"
+        }
+
     scores = {
         "implementation_complexity": _score_implementation_complexity(summary),
         "capital_efficiency": _score_capital_efficiency(summary),
