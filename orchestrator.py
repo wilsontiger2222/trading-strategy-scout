@@ -24,6 +24,53 @@ load_dotenv(PROJECT_ROOT / ".env")
 from agents import scout_agent, analyst_agent, dedup_agent, feasibility_agent, reporter_agent
 
 
+def _slug(s: str) -> str:
+    return ''.join(c.lower() if c.isalnum() else '-' for c in s).strip('-')
+
+
+def _auto_register_strategies(repos) -> int:
+    """Auto-register new strategies into data/active_strategies.json.
+
+    Criteria: recommendation == 'pursue' and not duplicate. Uses repo name as id.
+    """
+    active_path = PROJECT_ROOT / "data" / "active_strategies.json"
+    active_path.parent.mkdir(parents=True, exist_ok=True)
+    if active_path.exists():
+        try:
+            active = json.loads(active_path.read_text())
+        except Exception:
+            active = []
+    else:
+        active = []
+
+    existing_ids = {a.get("id") for a in active}
+    added = 0
+
+    for r in repos:
+        if r.get("dedup_status") == "duplicate":
+            continue
+        if r.get("feasibility", {}).get("recommendation") != "pursue":
+            continue
+        name = r.get("strategy_name") or r.get("repo_name") or r.get("name") or "Unnamed Strategy"
+        sid = _slug(name)
+        if sid in existing_ids:
+            continue
+        entry = {
+            "id": sid,
+            "name": name,
+            "status": "forward-test",
+            "strategy_tag": r.get("summary", {}).get("strategy_tag") or r.get("summary", {}).get("category") or "strategy",
+            "summary": r.get("summary", {}).get("overview") or r.get("summary", {}).get("one_liner") or "",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        active.append(entry)
+        existing_ids.add(sid)
+        added += 1
+
+    active_path.write_text(json.dumps(active, indent=2), encoding="utf-8")
+    return added
+
+
 def _setup_logging(date_str: str) -> logging.Logger:
     """Configure logging to both file and stdout."""
     log_dir = PROJECT_ROOT / "logs"
@@ -128,6 +175,14 @@ def run() -> None:
         logger.info("Report saved to %s", report_path)
     except Exception as exc:
         logger.error("Reporter agent failed: %s", exc, exc_info=True)
+
+    # Auto-register new strategies for forward testing
+    try:
+        added = _auto_register_strategies(scored)
+        if added:
+            logger.info("Auto-registered %d new strategies into active_strategies.json", added)
+    except Exception as exc:
+        logger.error("Auto-register failed: %s", exc)
 
     # Save the full pipeline output for debugging
     output_path = PROJECT_ROOT / "data" / "daily_scans" / f"{date_str}_full.json"
