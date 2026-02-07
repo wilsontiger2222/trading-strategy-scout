@@ -35,8 +35,8 @@ SEARCH_KEYWORDS = [
 GITHUB_API = "https://api.github.com"
 MIN_STARS = int(os.environ.get("MIN_STARS", "2"))
 PREFERRED_LANGUAGE = os.environ.get("PREFERRED_LANGUAGE", "Python")
-ALLOWED_LANGUAGES = [s.strip() for s in os.environ.get("ALLOWED_LANGUAGES", "Python").split(",") if s.strip()]
-EXCLUDE_KEYWORDS = [s.strip().lower() for s in os.environ.get("EXCLUDE_KEYWORDS", "arbitrage").split(",") if s.strip()]
+ALLOWED_LANGUAGES = [s.strip() for s in os.environ.get("ALLOWED_LANGUAGES", "").split(",") if s.strip()]
+EXCLUDE_KEYWORDS = [s.strip().lower() for s in os.environ.get("EXCLUDE_KEYWORDS", "").split(",") if s.strip()]
 SINCE_HOURS = int(os.environ.get("SINCE_HOURS", "24"))
 # Pause between API requests to stay under rate limits
 REQUEST_DELAY_SECONDS = 2
@@ -95,8 +95,12 @@ def _normalize(repo: dict) -> dict:
         "repo_name": repo.get("full_name", ""),
         "description": repo.get("description") or "",
         "stars": repo.get("stargazers_count", 0),
+        "forks": repo.get("forks_count", 0),
+        "open_issues": repo.get("open_issues_count", 0),
         "language": repo.get("language") or "",
         "created_at": repo.get("created_at", ""),
+        "updated_at": repo.get("updated_at", ""),
+        "fork": repo.get("fork", False),
         "topics": repo.get("topics", []),
     }
 
@@ -129,19 +133,20 @@ def run(output_path: str | None = None) -> list[dict]:
                 continue
             seen_urls.add(url)
 
-            # Language filter (allowlist)
+            # Language filter (allowlist) — optional
             lang = repo.get("language") or ""
             if ALLOWED_LANGUAGES and lang and lang not in ALLOWED_LANGUAGES:
                 continue
 
-            # Exclude keywords (arbitrage etc.) in name/desc/topics
-            haystack = " ".join([
-                repo.get("full_name", ""),
-                repo.get("description") or "",
-                " ".join(repo.get("topics") or []),
-            ]).lower()
-            if any(kw in haystack for kw in EXCLUDE_KEYWORDS):
-                continue
+            # Exclude keywords (optional)
+            if EXCLUDE_KEYWORDS:
+                haystack = " ".join([
+                    repo.get("full_name", ""),
+                    repo.get("description") or "",
+                    " ".join(repo.get("topics") or []),
+                ]).lower()
+                if any(kw in haystack for kw in EXCLUDE_KEYWORDS):
+                    continue
 
             if not _has_readme(repo["full_name"], headers):
                 logger.debug("Skipping %s — no README", repo["full_name"])

@@ -49,11 +49,25 @@ def _format_report(top_repos: list[dict], all_repos: list[dict], date_str: str) 
         lines.append(f"### Concept")
         lines.append(summary.get("core_concept", "N/A"))
         lines.append("")
-        lines.append(f"### Entry Logic")
-        lines.append(summary.get("entry_logic", "N/A"))
+        lines.append(f"### Implementation Blueprint")
+        lines.append(f"- Entry: {summary.get('entry_logic', 'N/A')}")
+        lines.append(f"- Exit: {summary.get('exit_logic', 'N/A')}")
+        lines.append(f"- Timeframe: {summary.get('timeframe', 'N/A')}")
+        lines.append(f"- Asset class: {summary.get('asset_class', 'N/A')}")
+        lines.append(f"- Data requirements: {summary.get('data_requirements', 'ohlcv')}")
         lines.append("")
-        lines.append(f"### Exit Logic")
-        lines.append(summary.get("exit_logic", "N/A"))
+        lines.append(f"### JSON Strategy Schema")
+        lines.append("```json")
+        lines.append(json.dumps({
+            "name": repo.get('repo_name', ''),
+            "category": summary.get('category', 'other'),
+            "entry": summary.get('entry_logic', ''),
+            "exit": summary.get('exit_logic', ''),
+            "timeframe": summary.get('timeframe', ''),
+            "asset_class": summary.get('asset_class', ''),
+            "data_requirements": summary.get('data_requirements', 'ohlcv')
+        }, indent=2))
+        lines.append("```")
         lines.append("")
         lines.append(f"### Indicators")
         indicators = summary.get("indicators", [])
@@ -70,11 +84,11 @@ def _format_report(top_repos: list[dict], all_repos: list[dict], date_str: str) 
         if feasibility.get('notes'):
             lines.append(f"- **Notes:** {feasibility.get('notes')}")
         lines.append("")
-        lines.append(f"**Timeframe:** {summary.get('timeframe', 'N/A')} | "
-                      f"**Asset class:** {summary.get('asset_class', 'N/A')} | "
-                      f"**Hyperliquid fit:** {'YES' if summary.get('hyperliquid_compatible') else 'NO'} | "
-                      f"**Novelty:** {repo.get('dedup_status', 'N/A')} "
-                      f"(similarity: {repo.get('max_similarity', 0):.2f})")
+        lines.append(f"**Hyperliquid compatible:** {'YES' if summary.get('hyperliquid_compatible') else 'NO/PARTIAL'} — {summary.get('hyperliquid_reason', 'n/a')}")
+        lines.append(f"**Quality score:** {repo.get('quality_score', 0)} / 10")
+        lines.append(f"**Status:** {repo.get('status', 'New')}")
+        lines.append("")
+        lines.append(f"**Novelty:** {repo.get('dedup_status', 'N/A')} (similarity: {repo.get('max_similarity', 0):.2f})")
         lines.append("")
         lines.append("---")
         lines.append("")
@@ -102,7 +116,8 @@ def _format_telegram_message(top_repos: list[dict], date_str: str) -> str:
         rec_emoji = {"pursue": "🟢", "monitor": "🟡", "skip": "🔴"}.get(rec, "⚪")
 
         lines.append(f"*{i}. {repo['repo_name']}* ⭐{repo.get('stars', 0)}")
-        lines.append(f"   {summary.get('category', '?')} | Score: {score:.1f}/10 {rec_emoji} {rec.upper()} | Hyperliquid: {'YES' if summary.get('hyperliquid_compatible') else 'NO'}")
+        lines.append(f"   {summary.get('category', '?')} | Score: {score:.1f}/10 {rec_emoji} {rec.upper()} | Hyperliquid: {'YES' if summary.get('hyperliquid_compatible') else 'NO/PARTIAL'}")
+        lines.append(f"   Data: {summary.get('data_requirements','ohlcv')} | Quality: {repo.get('quality_score',0)}/10 | Status: {repo.get('status','New')}")
         lines.append(f"   {summary.get('core_concept', 'N/A')[:120]}")
         lines.append(f"   [View repo]({repo.get('repo_url', '')})")
         lines.append("")
@@ -157,7 +172,6 @@ def run(repos: list[dict] | None = None, input_path: str | None = None) -> str:
     eligible = [
         r for r in repos
         if r.get("dedup_status") != "duplicate"
-        and not r.get("strategy_summary", {}).get("excluded")
         and r.get("feasibility", {}).get("overall_score", 0) > 0
     ]
     eligible.sort(key=lambda r: r.get("feasibility", {}).get("overall_score", 0), reverse=True)

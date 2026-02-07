@@ -34,7 +34,7 @@ STRATEGY_CATEGORIES = [
     "other",
 ]
 
-EXCLUDE_KEYWORDS = [s.strip().lower() for s in os.environ.get("EXCLUDE_KEYWORDS", "arbitrage").split(",") if s.strip()]
+EXCLUDE_KEYWORDS = [s.strip().lower() for s in os.environ.get("EXCLUDE_KEYWORDS", "").split(",") if s.strip()]
 
 
 def _github_headers() -> dict:
@@ -179,6 +179,8 @@ def _extract_indicators(text: str) -> list[str]:
         "VWAP", "OBV", "Stochastic", "ADX", "CCI", "Ichimoku",
         "Fibonacci", "Moving Average", "Volume Profile", "Supertrend",
         "Keltner", "Donchian", "Williams %R", "MFI", "ROC",
+        "Order Flow", "Orderbook", "Funding Rate", "Open Interest",
+        "Implied Volatility", "Gamma", "Delta",
     ]
     found = []
     upper = text.upper()
@@ -186,6 +188,43 @@ def _extract_indicators(text: str) -> list[str]:
         if ind.upper() in upper:
             found.append(ind)
     return found
+
+
+def _repo_quality_score(readme: str, file_contents: list[str], repo: dict) -> float:
+    """Heuristic quality score 0-10 based on docs, evidence, activity, and substance."""
+    score = 5.0
+    text = (readme or "").lower()
+
+    # Documentation quality
+    if len(readme) > 2000:
+        score += 1.0
+    if any(k in text for k in ["backtest", "results", "performance", "sharpe", "drawdown", "pnl"]):
+        score += 2.0
+    if any(k in text for k in ["entry", "exit", "signal", "strategy logic"]):
+        score += 1.0
+    if "disclaimer" in text:
+        score += 0.2
+
+    # Penalize sparse repos
+    total_code_chars = sum(len(c) for c in file_contents)
+    if total_code_chars < 500:
+        score -= 2.0
+
+    # Fork penalty
+    if repo.get("fork"):
+        score -= 1.0
+
+    # Stars/Activity boosts
+    if repo.get("stars", 0) >= 10:
+        score += 0.5
+    if repo.get("stars", 0) >= 50:
+        score += 1.0
+
+    # Issues/engagement boost
+    if repo.get("open_issues", 0) >= 5:
+        score += 0.5
+
+    return max(0.0, min(10.0, round(score, 2)))
 
 
 def _classify_category(text: str) -> str:
@@ -259,12 +298,27 @@ def _summarize_strategy(readme: str, file_contents: list[str]) -> dict:
             asset_class = asset
             break
 
-    # Exclusion (e.g., arbitrage) based on keyword match
+    # Exclusion (optional) based on keyword match
     excluded = any(kw in lower_raw for kw in EXCLUDE_KEYWORDS)
     exclude_reason = f"contains excluded keyword(s): {', '.join(EXCLUDE_KEYWORDS)}" if excluded else ""
 
-    # Hyperliquid compatibility heuristic
-    hyperliquid_compatible = asset_class == "crypto" and "equities" not in lower_raw and "forex" not in lower_raw
+    # Data requirement tagging
+    data_requirements = "ohlcv"
+    if any(k in lower_raw for k in ["order book", "orderbook", "level 2", "l2", "market depth", "order flow", "flow"]):
+        data_requirements = "orderbook"
+    if any(k in lower_raw for k in ["sentiment", "twitter", "news", "social", "reddit"]):
+        data_requirements = "external_api"
+    if any(k in lower_raw for k in ["on-chain", "onchain", "whale", "wallet", "defi", "liquidation"]):
+        data_requirements = "onchain"
+    if any(k in lower_raw for k in ["options chain", "options", "volatility", "iv", "greeks"]):
+        data_requirements = "derivatives"
+
+    # Hyperliquid compatibility heuristic (tag only)
+    hyperliquid_compatible = asset_class == "crypto"
+    hyperliquid_reason = "crypto-native" if hyperliquid_compatible else "non-crypto asset class"
+    if data_requirements in ("orderbook", "external_api", "onchain", "derivatives"):
+        hyperliquid_compatible = False
+        hyperliquid_reason = f"requires {data_requirements} data"
     exchange_compatibility = ["hyperliquid"] if hyperliquid_compatible else []
 
     # --- Core concept: extracted from cleaned README prose only ---
@@ -291,7 +345,9 @@ def _summarize_strategy(readme: str, file_contents: list[str]) -> dict:
         "excluded": excluded,
         "exclude_reason": exclude_reason,
         "hyperliquid_compatible": hyperliquid_compatible,
+        "hyperliquid_reason": hyperliquid_reason,
         "exchange_compatibility": exchange_compatibility,
+        "data_requirements": data_requirements,
     }
 
 
@@ -359,8 +415,9 @@ def run(repos: list[dict] | None = None, input_path: str | None = None) -> list[
 
             summary = _summarize_strategy(readme, file_contents)
             repo["strategy_summary"] = summary
+            repo["quality_score"] = _repo_quality_score(readme, file_contents, repo)
             analyzed.append(repo)
-            logger.info("  Category: %s | Indicators: %s", summary["category"], summary["indicators"])
+            logger.info("  Category: %s | Indicators: %s | Quality: %.1f", summary["category"], summary["indicators"], repo["quality_score"])
 
         except Exception as exc:
             logger.error("Failed to analyze %s: %s", repo_name, exc)
