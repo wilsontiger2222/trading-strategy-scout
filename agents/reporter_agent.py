@@ -1,0 +1,199 @@
+"""Reporter Agent — Generates a daily digest and sends it via Telegram.
+
+Selects the top 5 strategies by feasibility score, generates a markdown report,
+saves it to disk, and sends a summary to Telegram.
+"""
+
+import asyncio
+import json
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+TOP_N = 5
+
+
+def _format_report(top_repos: list[dict], all_repos: list[dict], date_str: str) -> str:
+    """Generate the full markdown report."""
+    lines = [
+        f"# Trading Strategy Scout — Daily Digest",
+        f"**Date:** {date_str}",
+        f"**Repos scanned:** {len(all_repos)}",
+        f"**Novel strategies found:** {sum(1 for r in all_repos if r.get('dedup_status') != 'duplicate')}",
+        "",
+        "---",
+        "",
+    ]
+
+    if not top_repos:
+        lines.append("*No new strategies found today.*")
+        return "\n".join(lines)
+
+    for i, repo in enumerate(top_repos, 1):
+        summary = repo.get("strategy_summary", {})
+        feasibility = repo.get("feasibility", {})
+        scores = feasibility.get("scores", {})
+
+        lines.append(f"## #{i}: {repo['repo_name']}")
+        lines.append("")
+        lines.append(f"**Stars:** {repo.get('stars', 0)} | "
+                      f"**Language:** {repo.get('language', 'N/A')} | "
+                      f"**Category:** {summary.get('category', 'N/A')}")
+        lines.append(f"**Link:** {repo.get('repo_url', '')}")
+        lines.append("")
+        lines.append(f"### Concept")
+        lines.append(summary.get("core_concept", "N/A"))
+        lines.append("")
+        lines.append(f"### Entry Logic")
+        lines.append(summary.get("entry_logic", "N/A"))
+        lines.append("")
+        lines.append(f"### Exit Logic")
+        lines.append(summary.get("exit_logic", "N/A"))
+        lines.append("")
+        lines.append(f"### Indicators")
+        indicators = summary.get("indicators", [])
+        lines.append(", ".join(indicators) if indicators else "None detected")
+        lines.append("")
+        lines.append(f"### Feasibility Scores")
+        lines.append(f"- Implementation complexity: {scores.get('implementation_complexity', '-')}/10")
+        lines.append(f"- Capital efficiency: {scores.get('capital_efficiency', '-')}/10")
+        lines.append(f"- Edge durability: {scores.get('edge_durability', '-')}/10")
+        lines.append(f"- Platform compatibility: {scores.get('platform_compatibility', '-')}/10")
+        lines.append(f"- Data requirements: {scores.get('data_requirements', '-')}/10")
+        lines.append(f"- **Overall: {feasibility.get('overall_score', 0):.2f}/10**")
+        lines.append(f"- **Recommendation: {feasibility.get('recommendation', '-').upper()}**")
+        lines.append("")
+        lines.append(f"**Timeframe:** {summary.get('timeframe', 'N/A')} | "
+                      f"**Asset class:** {summary.get('asset_class', 'N/A')} | "
+                      f"**Novelty:** {repo.get('dedup_status', 'N/A')} "
+                      f"(similarity: {repo.get('max_similarity', 0):.2f})")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _format_telegram_message(top_repos: list[dict], date_str: str) -> str:
+    """Format a shorter Telegram-friendly summary."""
+    lines = [
+        f"📊 *Trading Strategy Scout — {date_str}*",
+        "",
+    ]
+
+    if not top_repos:
+        lines.append("No new strategies found today.")
+        return "\n".join(lines)
+
+    for i, repo in enumerate(top_repos, 1):
+        summary = repo.get("strategy_summary", {})
+        feasibility = repo.get("feasibility", {})
+        score = feasibility.get("overall_score", 0)
+        rec = feasibility.get("recommendation", "?")
+
+        rec_emoji = {"pursue": "🟢", "monitor": "🟡", "skip": "🔴"}.get(rec, "⚪")
+
+        lines.append(f"*{i}. {repo['repo_name']}* ⭐{repo.get('stars', 0)}")
+        lines.append(f"   {summary.get('category', '?')} | Score: {score:.1f}/10 {rec_emoji} {rec.upper()}")
+        lines.append(f"   {summary.get('core_concept', 'N/A')[:120]}")
+        lines.append(f"   [View repo]({repo.get('repo_url', '')})")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+async def _send_telegram(message: str, bot_token: str, chat_id: str) -> bool:
+    """Send a message via Telegram bot API."""
+    try:
+        from telegram import Bot
+
+        bot = Bot(token=bot_token)
+        # Split message if too long (Telegram limit is 4096 chars)
+        if len(message) > 4000:
+            message = message[:3997] + "..."
+
+        await bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        )
+        logger.info("Telegram message sent successfully")
+        return True
+    except Exception as exc:
+        logger.error("Failed to send Telegram message: %s", exc)
+        return False
+
+
+def run(repos: list[dict] | None = None, input_path: str | None = None) -> str:
+    """Generate report and send Telegram notification.
+
+    Args:
+        repos: List of scored repo dicts.
+        input_path: Path to JSON file with scored repos.
+
+    Returns:
+        Path to the saved report file.
+    """
+    if repos is None:
+        if input_path is None:
+            raise ValueError("Provide either repos list or input_path")
+        with open(input_path, encoding="utf-8") as f:
+            repos = json.load(f)
+
+    logger.info("Reporter agent starting — %d repos to report", len(repos))
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Select top N non-duplicate strategies
+    eligible = [
+        r for r in repos
+        if r.get("dedup_status") != "duplicate"
+        and r.get("feasibility", {}).get("overall_score", 0) > 0
+    ]
+    eligible.sort(key=lambda r: r.get("feasibility", {}).get("overall_score", 0), reverse=True)
+    top = eligible[:TOP_N]
+
+    # Generate markdown report
+    report_md = _format_report(top, repos, date_str)
+
+    # Save report
+    report_dir = PROJECT_ROOT / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"{date_str}_digest.md"
+    report_path.write_text(report_md, encoding="utf-8")
+    logger.info("Report saved to %s", report_path)
+
+    # Send Telegram notification
+    bot_token = os.environ.get("BOT_TOKEN", "")
+    chat_id = os.environ.get("CHAT_ID", "")
+
+    if bot_token and chat_id:
+        tg_message = _format_telegram_message(top, date_str)
+        asyncio.run(_send_telegram(tg_message, bot_token, chat_id))
+    else:
+        logger.warning("Telegram credentials not configured — skipping notification")
+
+    logger.info("Reporter complete")
+    return str(report_path)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+
+    import sys
+
+    if len(sys.argv) > 1:
+        report = run(input_path=sys.argv[1])
+    else:
+        print("Usage: python -m agents.reporter_agent <input.json>")
+        sys.exit(1)
+    print(f"Report saved to: {report}")
