@@ -55,6 +55,7 @@ def _format_report(top_repos: list[dict], all_repos: list[dict], date_str: str) 
         lines.append(f"- Timeframe: {summary.get('timeframe', 'N/A')}")
         lines.append(f"- Asset class: {summary.get('asset_class', 'N/A')}")
         lines.append(f"- Data requirements: {summary.get('data_requirements', 'ohlcv')}")
+        lines.append(f"- Tier: {summary.get('tier', 'Unclear')} — {summary.get('tier_reason', '')}")
         lines.append("")
         lines.append(f"### JSON Strategy Schema")
         lines.append("```json")
@@ -116,7 +117,7 @@ def _format_telegram_message(top_repos: list[dict], date_str: str) -> str:
         rec_emoji = {"pursue": "🟢", "monitor": "🟡", "skip": "🔴"}.get(rec, "⚪")
 
         lines.append(f"*{i}. {repo['repo_name']}* ⭐{repo.get('stars', 0)}")
-        lines.append(f"   {summary.get('category', '?')} | Score: {score:.1f}/10 {rec_emoji} {rec.upper()} | Hyperliquid: {'YES' if summary.get('hyperliquid_compatible') else 'NO/PARTIAL'}")
+        lines.append(f"   {summary.get('category', '?')} | {summary.get('tier','Unclear')} | Score: {score:.1f}/10 {rec_emoji} {rec.upper()} | Hyperliquid: {'YES' if summary.get('hyperliquid_compatible') else 'NO/PARTIAL'}")
         lines.append(f"   Data: {summary.get('data_requirements','ohlcv')} | Quality: {repo.get('quality_score',0)}/10 | Status: {repo.get('status','New')}")
         lines.append(f"   {summary.get('core_concept', 'N/A')[:120]}")
         lines.append(f"   [View repo]({repo.get('repo_url', '')})")
@@ -168,13 +169,21 @@ def run(repos: list[dict] | None = None, input_path: str | None = None) -> str:
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # Select top N non-duplicate strategies
+    # Select top N non-duplicate strategies (tiered)
     eligible = [
         r for r in repos
         if r.get("dedup_status") != "duplicate"
-        and r.get("feasibility", {}).get("overall_score", 0) > 0
     ]
-    eligible.sort(key=lambda r: r.get("feasibility", {}).get("overall_score", 0), reverse=True)
+    tier_rank = {"Tier 1": 3, "Tier 2": 2, "Tier 3": 1, "Unclear": 0}
+
+    def _score(r):
+        summary = r.get("strategy_summary", {})
+        tier = summary.get("tier", "Unclear")
+        feas = r.get("feasibility", {}).get("overall_score", 0)
+        quality = r.get("quality_score", 0)
+        return (tier_rank.get(tier, 0), feas, quality)
+
+    eligible.sort(key=_score, reverse=True)
     top = eligible[:TOP_N]
 
     # Generate markdown report

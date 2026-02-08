@@ -24,6 +24,18 @@ REQUEST_DELAY_SECONDS = 2
 # Files whose names suggest strategy logic
 PRIORITY_NAME_PATTERNS = re.compile(r"(strategy|signal|trade|backtest|engine|core)", re.IGNORECASE)
 
+CODE_INDICATOR_KEYWORDS = [
+    "rsi", "macd", "bollinger", "crossover", "sma", "ema", "vwap", "atr",
+    "stochastic", "adx", "cci", "supertrend", "donchian", "keltner"
+]
+CODE_EXECUTION_KEYWORDS = [
+    "buy_signal", "sell_signal", "entry_condition", "exit_condition",
+    "stop_loss", "take_profit", "position_size", "risk", "sl", "tp"
+]
+BACKTEST_FRAMEWORKS = [
+    "backtrader", "zipline", "freqtrade", "jesse", "vectorbt"
+]
+
 STRATEGY_CATEGORIES = [
     "momentum",
     "mean-reversion",
@@ -333,11 +345,37 @@ def _summarize_strategy(readme: str, file_contents: list[str]) -> dict:
     if len(core_concept) > 300:
         core_concept = core_concept[:297] + "..."
 
-    # --- Entry/exit logic: extracted from cleaned README only (never raw code) ---
+    # --- Entry/exit logic: from README + docstrings/comments (no code leakage) ---
+    doc_text = _strip_code_and_markdown(_extract_doc_text(file_contents))
+    combined_prose = (clean_readme + "\n\n" + doc_text).strip()
+
+    entry_logic = _extract_logic_hint(combined_prose or clean_readme, "entry")
+    exit_logic = _extract_logic_hint(combined_prose or clean_readme, "exit")
+
+    explicit_entry = not entry_logic.lower().startswith("no explicit entry")
+    explicit_exit = not exit_logic.lower().startswith("no explicit exit")
+    explicit_rules = explicit_entry and explicit_exit
+
+    implied_rules = _code_implies_strategy(file_contents)
+    described_rules = bool(doc_text.strip()) and ("strategy" in doc_text.lower() or "signal" in doc_text.lower())
+
+    if explicit_rules:
+        tier = "Tier 1"
+        tier_reason = "Explicit entry/exit rules in README or docstrings."
+    elif implied_rules:
+        tier = "Tier 2"
+        tier_reason = "Implied rules found in code (signals/indicators/backtest framework)."
+    elif described_rules:
+        tier = "Tier 3"
+        tier_reason = "Strategy described in docs/comments; logic requires extraction."
+    else:
+        tier = "Unclear"
+        tier_reason = "No clear strategy logic detected."
+
     return {
         "core_concept": core_concept,
-        "entry_logic": _extract_logic_hint(clean_readme, "entry"),
-        "exit_logic": _extract_logic_hint(clean_readme, "exit"),
+        "entry_logic": entry_logic,
+        "exit_logic": exit_logic,
         "indicators": indicators,
         "timeframe": timeframe,
         "asset_class": asset_class,
@@ -348,7 +386,32 @@ def _summarize_strategy(readme: str, file_contents: list[str]) -> dict:
         "hyperliquid_reason": hyperliquid_reason,
         "exchange_compatibility": exchange_compatibility,
         "data_requirements": data_requirements,
+        "tier": tier,
+        "tier_reason": tier_reason,
     }
+
+
+def _extract_doc_text(file_contents: list[str]) -> str:
+    """Extract docstrings and comments for prose-only analysis (no code)."""
+    docs = []
+    for content in file_contents:
+        # triple-quoted docstrings
+        docs += re.findall(r'"""(.*?)"""', content, flags=re.DOTALL)
+        docs += re.findall(r"'''(.*?)'''", content, flags=re.DOTALL)
+        # line comments
+        for line in content.splitlines():
+            line = line.strip()
+            if line.startswith('#') and len(line) > 2:
+                docs.append(line.lstrip('#').strip())
+    return "\n".join(docs)
+
+
+def _code_implies_strategy(file_contents: list[str]) -> bool:
+    lower = "\n".join(file_contents).lower()
+    hit_indicators = any(k in lower for k in CODE_INDICATOR_KEYWORDS)
+    hit_exec = any(k in lower for k in CODE_EXECUTION_KEYWORDS)
+    hit_backtest = any(k in lower for k in BACKTEST_FRAMEWORKS)
+    return (hit_indicators and hit_exec) or hit_backtest
 
 
 def _extract_logic_hint(text: str, direction: str) -> str:
