@@ -127,23 +127,29 @@ def _format_telegram_message(top_repos: list[dict], date_str: str) -> str:
 
 
 async def _send_telegram(message: str, bot_token: str, chat_id: str) -> bool:
-    """Send a message via Telegram bot API."""
+    """Send a message via Telegram HTTP API (no SDK)."""
+    import requests
     try:
-        from telegram import Bot
-
-        bot = Bot(token=bot_token)
         # Split message if too long (Telegram limit is 4096 chars)
         if len(message) > 4000:
             message = message[:3997] + "..."
 
-        await bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode="Markdown",
-            disable_web_page_preview=True,
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        resp = requests.post(
+            url,
+            json={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown",
+                "disable_web_page_preview": True,
+            },
+            timeout=20,
         )
-        logger.info("Telegram message sent successfully")
-        return True
+        if resp.ok:
+            logger.info("Telegram message sent successfully")
+            return True
+        logger.error("Failed to send Telegram message: %s", resp.text)
+        return False
     except Exception as exc:
         logger.error("Failed to send Telegram message: %s", exc)
         return False
