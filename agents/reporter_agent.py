@@ -199,7 +199,13 @@ def run(repos: list[dict] | None = None, input_path: str | None = None) -> str:
         tier = summary.get("tier", "Unclear")
         feas = r.get("feasibility", {}).get("overall_score", 0)
         quality = r.get("quality_score", 0)
-        return (tier_rank.get(tier, 0), feas, quality)
+        hay = " ".join([
+            (r.get("repo_name") or ""),
+            (r.get("description") or ""),
+            (summary.get("core_concept") or "")
+        ]).lower()
+        hyperliquid_boost = 0.2 if "hyperliquid" in hay else 0
+        return (tier_rank.get(tier, 0), feas + hyperliquid_boost, quality)
 
     eligible = [r for r in eligible if not _is_framework(r) and r.get("strategy_summary", {}).get("tier") != "Unclear"]
     eligible.sort(key=_score, reverse=True)
