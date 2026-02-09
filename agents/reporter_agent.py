@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 TOP_N = 5
+FRAMEWORK_KEYWORDS = [
+    "framework", "library", "sdk", "engine", "platform", "toolkit",
+    "backtesting", "backtest", "data pipeline", "infrastructure"
+]
 
 
 def _format_report(top_repos: list[dict], all_repos: list[dict], date_str: str) -> str:
@@ -175,12 +179,20 @@ def run(repos: list[dict] | None = None, input_path: str | None = None) -> str:
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # Select top N non-duplicate strategies (tiered)
+    # Select top N non-duplicate strategies (tiered + exclude frameworks)
     eligible = [
         r for r in repos
         if r.get("dedup_status") != "duplicate"
     ]
     tier_rank = {"Tier 1": 3, "Tier 2": 2, "Tier 3": 1, "Unclear": 0}
+
+    def _is_framework(r):
+        hay = " ".join([
+            (r.get("repo_name") or ""),
+            (r.get("description") or ""),
+            (r.get("strategy_summary", {}).get("core_concept") or "")
+        ]).lower()
+        return any(k in hay for k in FRAMEWORK_KEYWORDS)
 
     def _score(r):
         summary = r.get("strategy_summary", {})
@@ -189,6 +201,7 @@ def run(repos: list[dict] | None = None, input_path: str | None = None) -> str:
         quality = r.get("quality_score", 0)
         return (tier_rank.get(tier, 0), feas, quality)
 
+    eligible = [r for r in eligible if not _is_framework(r) and r.get("strategy_summary", {}).get("tier") != "Unclear"]
     eligible.sort(key=_score, reverse=True)
     top = eligible[:TOP_N]
 
